@@ -4,6 +4,8 @@ import cors from 'cors'
 import routes from './routes/index.js'
 import authRoutes from './routes/auth.js'
 import adminClubesRoutes from './routes/admin/clubes.js'
+import adminCategoriasRoutes from './routes/admin/categorias.js'
+import adminActividadesRoutes from './routes/admin/actividades.js'
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -23,6 +25,8 @@ app.get('/health', (_req, res) => {
 app.use('/api', routes)
 app.use('/api/auth', authRoutes)
 app.use('/api/admin/clubes', adminClubesRoutes)
+app.use('/api/admin/categorias', adminCategoriasRoutes)
+app.use('/api/admin/actividades', adminActividadesRoutes)
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`)
