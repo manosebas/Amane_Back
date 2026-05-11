@@ -7,7 +7,7 @@ router.post('/registro', async (req, res) => {
   try {
     const {
       nombre, apellido, email, cedula, telefono, password,
-      club_id, es_socio, respuestas,
+      club_id, es_socio, acepto_terminos, respuestas,
     } = req.body
 
     if (!nombre || !apellido || !email || !cedula || !telefono || !password || !club_id) {
@@ -16,7 +16,7 @@ router.post('/registro', async (req, res) => {
 
     const { data: club } = await supabase
       .from('clubes')
-      .select('id, mostrar_es_socio, mostrar_terminos')
+      .select('id, mostrar_es_socio, es_socio_requerido, mostrar_terminos, terminos_requerido')
       .eq('id', club_id)
       .eq('activo', true)
       .maybeSingle()
@@ -25,17 +25,26 @@ router.post('/registro', async (req, res) => {
       return res.status(400).json({ error: 'El club seleccionado no es válido.' })
     }
 
+    if (club.mostrar_es_socio && club.es_socio_requerido) {
+      if (es_socio !== true && es_socio !== false) {
+        return res.status(400).json({ error: 'Debes indicar si eres socio del club.' })
+      }
+    }
+
+    if (club.mostrar_terminos && club.terminos_requerido && !acepto_terminos) {
+      return res.status(400).json({ error: 'Debes aceptar los términos y condiciones.' })
+    }
+
     const { data: checkboxesClub } = await supabase
       .from('club_checkboxes')
       .select('id, etiqueta, requerido')
       .eq('club_id', club_id)
 
-    const requeridos = (checkboxesClub ?? []).filter(c => c.requerido)
     const respuestasMap = new Map(
       Array.isArray(respuestas) ? respuestas.map(r => [r.checkbox_id, !!r.valor]) : []
     )
 
-    for (const cb of requeridos) {
+    for (const cb of (checkboxesClub ?? []).filter(c => c.requerido)) {
       if (respuestasMap.get(cb.id) !== true) {
         return res.status(400).json({ error: `Debes aceptar: "${cb.etiqueta}".` })
       }
@@ -64,6 +73,8 @@ router.post('/registro', async (req, res) => {
       return res.status(400).json({ error: mensajes[authError.message] ?? authError.message })
     }
 
+    const esSocioValor = (es_socio === true || es_socio === false) ? es_socio : null
+
     const { error: perfilError } = await supabase
       .from('perfiles')
       .insert({
@@ -72,9 +83,11 @@ router.post('/registro', async (req, res) => {
         apellido,
         cedula,
         telefono,
-        es_socio: club.mostrar_es_socio ? (es_socio ?? false) : false,
+        es_socio: club.mostrar_es_socio ? esSocioValor : null,
         club_id,
-        acepto_terminos_at: new Date().toISOString(),
+        acepto_terminos_at: (club.mostrar_terminos && acepto_terminos)
+          ? new Date().toISOString()
+          : null,
       })
 
     if (perfilError) {

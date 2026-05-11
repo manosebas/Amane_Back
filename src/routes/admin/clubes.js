@@ -70,7 +70,12 @@ router.get('/', async (_req, res) => {
 router.post('/', camposArchivos, async (req, res) => {
   try {
     const datos = parseDatos(req)
-    const { nombre, descripcion, activo, mostrar_es_socio, mostrar_terminos, checkboxes } = datos
+    const {
+      nombre, descripcion, activo,
+      mostrar_es_socio, es_socio_requerido,
+      mostrar_terminos, terminos_requerido,
+      checkboxes,
+    } = datos
 
     if (!nombre || nombre.trim().length === 0) {
       return res.status(400).json({ error: 'El nombre del club es requerido.' })
@@ -83,7 +88,9 @@ router.post('/', camposArchivos, async (req, res) => {
         descripcion: descripcion?.trim() || null,
         activo: activo ?? true,
         mostrar_es_socio: mostrar_es_socio ?? true,
+        es_socio_requerido: es_socio_requerido ?? false,
         mostrar_terminos: mostrar_terminos ?? true,
+        terminos_requerido: terminos_requerido ?? true,
       })
       .select()
       .single()
@@ -122,14 +129,21 @@ router.put('/:id', camposArchivos, async (req, res) => {
   try {
     const { id } = req.params
     const datos = parseDatos(req)
-    const { nombre, descripcion, activo, mostrar_es_socio, mostrar_terminos, checkboxes } = datos
+    const {
+      nombre, descripcion, activo,
+      mostrar_es_socio, es_socio_requerido,
+      mostrar_terminos, terminos_requerido,
+      checkboxes,
+    } = datos
 
     const updates = {}
     if (nombre !== undefined) updates.nombre = nombre.trim()
     if (descripcion !== undefined) updates.descripcion = descripcion?.trim() || null
     if (activo !== undefined) updates.activo = !!activo
     if (mostrar_es_socio !== undefined) updates.mostrar_es_socio = !!mostrar_es_socio
+    if (es_socio_requerido !== undefined) updates.es_socio_requerido = !!es_socio_requerido
     if (mostrar_terminos !== undefined) updates.mostrar_terminos = !!mostrar_terminos
+    if (terminos_requerido !== undefined) updates.terminos_requerido = !!terminos_requerido
 
     const logo = req.files?.logo?.[0]
     const pdf = req.files?.terminos_pdf?.[0]
