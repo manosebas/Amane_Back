@@ -5,21 +5,40 @@ const router = Router()
 
 router.post('/registro', async (req, res) => {
   try {
-    const { nombre, apellido, email, cedula, telefono, password, club_id, es_socio } = req.body
+    const {
+      nombre, apellido, email, cedula, telefono, password,
+      club_id, es_socio, respuestas,
+    } = req.body
 
     if (!nombre || !apellido || !email || !cedula || !telefono || !password || !club_id) {
       return res.status(400).json({ error: 'Todos los campos son requeridos.' })
     }
 
-    const { data: clubExiste } = await supabase
+    const { data: club } = await supabase
       .from('clubes')
-      .select('id')
+      .select('id, mostrar_es_socio, mostrar_terminos')
       .eq('id', club_id)
       .eq('activo', true)
       .maybeSingle()
 
-    if (!clubExiste) {
+    if (!club) {
       return res.status(400).json({ error: 'El club seleccionado no es válido.' })
+    }
+
+    const { data: checkboxesClub } = await supabase
+      .from('club_checkboxes')
+      .select('id, etiqueta, requerido')
+      .eq('club_id', club_id)
+
+    const requeridos = (checkboxesClub ?? []).filter(c => c.requerido)
+    const respuestasMap = new Map(
+      Array.isArray(respuestas) ? respuestas.map(r => [r.checkbox_id, !!r.valor]) : []
+    )
+
+    for (const cb of requeridos) {
+      if (respuestasMap.get(cb.id) !== true) {
+        return res.status(400).json({ error: `Debes aceptar: "${cb.etiqueta}".` })
+      }
     }
 
     const { data: cedulaExiste } = await supabase
@@ -53,7 +72,7 @@ router.post('/registro', async (req, res) => {
         apellido,
         cedula,
         telefono,
-        es_socio: es_socio ?? false,
+        es_socio: club.mostrar_es_socio ? (es_socio ?? false) : false,
         club_id,
         acepto_terminos_at: new Date().toISOString(),
       })
@@ -61,6 +80,15 @@ router.post('/registro', async (req, res) => {
     if (perfilError) {
       await supabase.auth.admin.deleteUser(authData.user.id)
       return res.status(500).json({ error: 'Error al guardar el perfil. Intenta nuevamente.' })
+    }
+
+    if (checkboxesClub && checkboxesClub.length > 0) {
+      const filas = checkboxesClub.map(cb => ({
+        perfil_id: authData.user.id,
+        checkbox_id: cb.id,
+        valor: respuestasMap.get(cb.id) ?? false,
+      }))
+      await supabase.from('perfil_respuestas').insert(filas)
     }
 
     res.json({ mensaje: 'Cuenta creada exitosamente.' })
