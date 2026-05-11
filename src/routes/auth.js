@@ -35,7 +35,7 @@ router.post('/registro', async (req, res) => {
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password,
-      email_confirm: false,
+      email_confirm: true,
     })
 
     if (authError) {
@@ -63,7 +63,7 @@ router.post('/registro', async (req, res) => {
       return res.status(500).json({ error: 'Error al guardar el perfil. Intenta nuevamente.' })
     }
 
-    res.json({ mensaje: 'Cuenta creada. Revisa tu correo para confirmar tu cuenta.' })
+    res.json({ mensaje: 'Cuenta creada exitosamente.' })
   } catch (err) {
     console.error('Error en /registro:', err)
     res.status(500).json({ error: 'Error interno del servidor.' })
