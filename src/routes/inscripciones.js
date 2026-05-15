@@ -14,8 +14,8 @@ async function getPadre(req) {
   return data
 }
 
-// Semana activa del club del padre (si existe alguna)
-router.get('/semana-activa', async (req, res) => {
+// Todas las semanas activas del club del padre, ordenadas por fecha
+router.get('/semanas-activas', async (req, res) => {
   const padre = await getPadre(req)
   if (!padre) return res.status(404).json({ error: 'Perfil no encontrado.' })
 
@@ -25,13 +25,11 @@ router.get('/semana-activa', async (req, res) => {
     .eq('club_id', padre.club_id)
     .eq('estado', 'activa')
     .order('fecha_inicio', { ascending: false })
-    .limit(1)
-    .maybeSingle()
 
-  res.json({ semana: data })
+  res.json({ semanas: data ?? [] })
 })
 
-// Slots disponibles para un niño en la semana activa, con conteo de inscritos
+// Slots disponibles para un niño en una semana específica, con conteo de inscritos
 router.get('/slots-disponibles/:ninoId', async (req, res) => {
   const padre = await getPadre(req)
   if (!padre) return res.status(404).json({ error: 'Perfil no encontrado.' })
@@ -45,16 +43,20 @@ router.get('/slots-disponibles/:ninoId', async (req, res) => {
     return res.status(404).json({ error: 'Niño no encontrado.' })
   }
 
+  const semanaId = req.query.semana_id
+  if (!semanaId) {
+    return res.status(400).json({ error: 'semana_id es requerido.' })
+  }
+
   const { data: semana } = await supabase
     .from('semanas')
-    .select('id')
-    .eq('club_id', padre.club_id)
-    .eq('estado', 'activa')
-    .order('fecha_inicio', { ascending: false })
-    .limit(1)
+    .select('id, club_id, estado')
+    .eq('id', semanaId)
     .maybeSingle()
 
-  if (!semana) return res.json({ semana_id: null, slots: [] })
+  if (!semana || semana.club_id !== padre.club_id || semana.estado !== 'activa') {
+    return res.status(400).json({ error: 'Semana inválida.' })
+  }
 
   const { data: slots } = await supabase
     .from('slots')
