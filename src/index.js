@@ -6,6 +6,9 @@ import authRoutes from './routes/auth.js'
 import adminClubesRoutes from './routes/admin/clubes.js'
 import adminCategoriasRoutes from './routes/admin/categorias.js'
 import adminActividadesRoutes from './routes/admin/actividades.js'
+import adminGruposRoutes from './routes/admin/grupos.js'
+import adminPersonalRoutes from './routes/admin/personal.js'
+import adminClubActividadesRoutes from './routes/admin/clubActividades.js'
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -27,6 +30,9 @@ app.use('/api/auth', authRoutes)
 app.use('/api/admin/clubes', adminClubesRoutes)
 app.use('/api/admin/categorias', adminCategoriasRoutes)
 app.use('/api/admin/actividades', adminActividadesRoutes)
+app.use('/api/admin/grupos', adminGruposRoutes)
+app.use('/api/admin/personal', adminPersonalRoutes)
+app.use('/api/admin/club-actividades', adminClubActividadesRoutes)
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`)

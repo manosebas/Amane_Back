@@ -80,20 +80,36 @@ async function sincronizarCheckboxes(clubId, checkboxes, archivos) {
 
 router.use(requireAuth, requireAdmin)
 
+const SELECT_COMPLETO =
+  '*, checkboxes:club_checkboxes(id, etiqueta, requerido, orden, pdf_url), grupos:club_grupos(grupo_id)'
+
 router.get('/', async (_req, res) => {
   const { data, error } = await supabase
     .from('clubes')
-    .select('*, checkboxes:club_checkboxes(id, etiqueta, requerido, orden, pdf_url)')
+    .select(SELECT_COMPLETO)
     .order('created_at')
 
   if (error) return res.status(500).json({ error: error.message })
-  res.json({ clubes: data })
+  const clubes = (data ?? []).map(c => ({
+    ...c,
+    grupo_ids: (c.grupos ?? []).map(g => g.grupo_id),
+    grupos: undefined,
+  }))
+  res.json({ clubes })
 })
+
+async function sincronizarGrupos(clubId, grupoIds) {
+  if (!Array.isArray(grupoIds)) return
+  await supabase.from('club_grupos').delete().eq('club_id', clubId)
+  if (grupoIds.length === 0) return
+  const filas = grupoIds.map(grupo_id => ({ club_id: clubId, grupo_id }))
+  await supabase.from('club_grupos').insert(filas)
+}
 
 router.post('/', recibirArchivos, async (req, res) => {
   try {
     const datos = parseDatos(req)
-    const { nombre, descripcion, activo, checkboxes } = datos
+    const { nombre, descripcion, activo, checkboxes, grupo_ids } = datos
 
     if (!nombre || nombre.trim().length === 0) {
       return res.status(400).json({ error: 'El nombre del club es requerido.' })
@@ -122,6 +138,7 @@ router.post('/', recibirArchivos, async (req, res) => {
     }
 
     await sincronizarCheckboxes(nuevo.id, checkboxes, archivos)
+    await sincronizarGrupos(nuevo.id, grupo_ids)
 
     res.json({ club: nuevo })
   } catch (err) {
@@ -134,7 +151,7 @@ router.put('/:id', recibirArchivos, async (req, res) => {
   try {
     const { id } = req.params
     const datos = parseDatos(req)
-    const { nombre, descripcion, activo, checkboxes } = datos
+    const { nombre, descripcion, activo, checkboxes, grupo_ids } = datos
 
     const updates = {}
     if (nombre !== undefined) updates.nombre = nombre.trim()
@@ -157,14 +174,23 @@ router.put('/:id', recibirArchivos, async (req, res) => {
     if (checkboxes !== undefined) {
       await sincronizarCheckboxes(id, checkboxes, archivos)
     }
+    if (grupo_ids !== undefined) {
+      await sincronizarGrupos(id, grupo_ids)
+    }
 
     const { data: actualizado } = await supabase
       .from('clubes')
-      .select('*, checkboxes:club_checkboxes(id, etiqueta, requerido, orden, pdf_url)')
+      .select(SELECT_COMPLETO)
       .eq('id', id)
       .single()
 
-    res.json({ club: actualizado })
+    const club = actualizado ? {
+      ...actualizado,
+      grupo_ids: (actualizado.grupos ?? []).map(g => g.grupo_id),
+      grupos: undefined,
+    } : null
+
+    res.json({ club })
   } catch (err) {
     console.error('PUT /api/admin/clubes/:id:', err)
     res.status(500).json({ error: err.message ?? 'Error al actualizar el club.' })
