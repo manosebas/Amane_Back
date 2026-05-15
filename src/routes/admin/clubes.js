@@ -14,17 +14,15 @@ const upload = multer({
     if (file.fieldname === 'logo' && !file.mimetype.startsWith('image/')) {
       return cb(new Error('El logo debe ser una imagen.'))
     }
-    if (file.fieldname === 'terminos_pdf' && file.mimetype !== 'application/pdf') {
-      return cb(new Error('Los términos deben ser un PDF.'))
+    if (file.fieldname.startsWith('checkbox_pdf_') && file.mimetype !== 'application/pdf') {
+      return cb(new Error('Los archivos adjuntos a checkboxes deben ser PDF.'))
     }
     cb(null, true)
   },
 })
 
-const camposArchivos = upload.fields([
-  { name: 'logo', maxCount: 1 },
-  { name: 'terminos_pdf', maxCount: 1 },
-])
+// Aceptamos logo + cualquier campo "checkbox_pdf_<idx>"
+const recibirArchivos = upload.any()
 
 function parseDatos(req) {
   try {
@@ -34,25 +32,50 @@ function parseDatos(req) {
   }
 }
 
-async function sincronizarCheckboxes(clubId, checkboxes) {
+function archivosPorCampo(files) {
+  const map = {}
+  for (const f of files ?? []) {
+    map[f.fieldname] = f
+  }
+  return map
+}
+
+async function sincronizarCheckboxes(clubId, checkboxes, archivos) {
   if (!Array.isArray(checkboxes)) return
 
   await supabase.from('club_checkboxes').delete().eq('club_id', clubId)
 
-  if (checkboxes.length === 0) return
+  const validos = checkboxes.filter(cb => (cb.etiqueta ?? '').trim().length > 0)
+  if (validos.length === 0) return
 
-  const filas = checkboxes
-    .filter(cb => (cb.etiqueta ?? '').trim().length > 0)
-    .map((cb, i) => ({
-      club_id: clubId,
-      etiqueta: cb.etiqueta.trim(),
-      requerido: !!cb.requerido,
-      orden: i,
-    }))
+  // Insertar primero para obtener ids; el PDF se sube después con un path determinístico.
+  const filas = validos.map((cb, i) => ({
+    club_id: clubId,
+    etiqueta: cb.etiqueta.trim(),
+    requerido: !!cb.requerido,
+    orden: i,
+    // Si el cliente envió pdf_url existente (sin reemplazo) lo conservamos
+    pdf_url: cb.pdf_url ?? null,
+  }))
 
-  if (filas.length === 0) return
+  const { data: insertados, error: errIns } = await supabase
+    .from('club_checkboxes')
+    .insert(filas)
+    .select('id, orden')
 
-  await supabase.from('club_checkboxes').insert(filas)
+  if (errIns) throw errIns
+
+  // Subir PDFs nuevos (uno por checkbox) usando el fieldname "checkbox_pdf_<orden>"
+  for (const cb of insertados ?? []) {
+    const archivo = archivos[`checkbox_pdf_${cb.orden}`]
+    if (!archivo) continue
+    const url = await subirArchivo(
+      'checkboxes-pdfs',
+      `${clubId}/${cb.id}.pdf`,
+      archivo,
+    )
+    await supabase.from('club_checkboxes').update({ pdf_url: url }).eq('id', cb.id)
+  }
 }
 
 router.use(requireAuth, requireAdmin)
@@ -60,22 +83,17 @@ router.use(requireAuth, requireAdmin)
 router.get('/', async (_req, res) => {
   const { data, error } = await supabase
     .from('clubes')
-    .select('*, checkboxes:club_checkboxes(id, etiqueta, requerido, orden)')
+    .select('*, checkboxes:club_checkboxes(id, etiqueta, requerido, orden, pdf_url)')
     .order('created_at')
 
   if (error) return res.status(500).json({ error: error.message })
   res.json({ clubes: data })
 })
 
-router.post('/', camposArchivos, async (req, res) => {
+router.post('/', recibirArchivos, async (req, res) => {
   try {
     const datos = parseDatos(req)
-    const {
-      nombre, descripcion, activo,
-      mostrar_es_socio, es_socio_requerido,
-      mostrar_terminos, terminos_requerido,
-      checkboxes,
-    } = datos
+    const { nombre, descripcion, activo, checkboxes } = datos
 
     if (!nombre || nombre.trim().length === 0) {
       return res.status(400).json({ error: 'El nombre del club es requerido.' })
@@ -87,36 +105,23 @@ router.post('/', camposArchivos, async (req, res) => {
         nombre: nombre.trim(),
         descripcion: descripcion?.trim() || null,
         activo: activo ?? true,
-        mostrar_es_socio: mostrar_es_socio ?? true,
-        es_socio_requerido: es_socio_requerido ?? false,
-        mostrar_terminos: mostrar_terminos ?? true,
-        terminos_requerido: terminos_requerido ?? true,
       })
       .select()
       .single()
 
     if (error) return res.status(400).json({ error: error.message })
 
-    const updates = {}
-    const logo = req.files?.logo?.[0]
-    const pdf = req.files?.terminos_pdf?.[0]
+    const archivos = archivosPorCampo(req.files)
+    const logo = archivos.logo
 
     if (logo) {
       const ext = extensionDesdeMime(logo.mimetype)
       const url = await subirArchivo('clubes-logos', `${nuevo.id}/logo.${ext}`, logo)
-      updates.logo_url = url
-    }
-    if (pdf) {
-      const url = await subirArchivo('clubes-terminos', `${nuevo.id}/terminos.pdf`, pdf)
-      updates.terminos_pdf_url = url
+      await supabase.from('clubes').update({ logo_url: url }).eq('id', nuevo.id)
+      nuevo.logo_url = url
     }
 
-    if (Object.keys(updates).length > 0) {
-      await supabase.from('clubes').update(updates).eq('id', nuevo.id)
-      Object.assign(nuevo, updates)
-    }
-
-    await sincronizarCheckboxes(nuevo.id, checkboxes)
+    await sincronizarCheckboxes(nuevo.id, checkboxes, archivos)
 
     res.json({ club: nuevo })
   } catch (err) {
@@ -125,35 +130,23 @@ router.post('/', camposArchivos, async (req, res) => {
   }
 })
 
-router.put('/:id', camposArchivos, async (req, res) => {
+router.put('/:id', recibirArchivos, async (req, res) => {
   try {
     const { id } = req.params
     const datos = parseDatos(req)
-    const {
-      nombre, descripcion, activo,
-      mostrar_es_socio, es_socio_requerido,
-      mostrar_terminos, terminos_requerido,
-      checkboxes,
-    } = datos
+    const { nombre, descripcion, activo, checkboxes } = datos
 
     const updates = {}
     if (nombre !== undefined) updates.nombre = nombre.trim()
     if (descripcion !== undefined) updates.descripcion = descripcion?.trim() || null
     if (activo !== undefined) updates.activo = !!activo
-    if (mostrar_es_socio !== undefined) updates.mostrar_es_socio = !!mostrar_es_socio
-    if (es_socio_requerido !== undefined) updates.es_socio_requerido = !!es_socio_requerido
-    if (mostrar_terminos !== undefined) updates.mostrar_terminos = !!mostrar_terminos
-    if (terminos_requerido !== undefined) updates.terminos_requerido = !!terminos_requerido
 
-    const logo = req.files?.logo?.[0]
-    const pdf = req.files?.terminos_pdf?.[0]
+    const archivos = archivosPorCampo(req.files)
+    const logo = archivos.logo
 
     if (logo) {
       const ext = extensionDesdeMime(logo.mimetype)
       updates.logo_url = await subirArchivo('clubes-logos', `${id}/logo.${ext}`, logo)
-    }
-    if (pdf) {
-      updates.terminos_pdf_url = await subirArchivo('clubes-terminos', `${id}/terminos.pdf`, pdf)
     }
 
     if (Object.keys(updates).length > 0) {
@@ -162,12 +155,12 @@ router.put('/:id', camposArchivos, async (req, res) => {
     }
 
     if (checkboxes !== undefined) {
-      await sincronizarCheckboxes(id, checkboxes)
+      await sincronizarCheckboxes(id, checkboxes, archivos)
     }
 
     const { data: actualizado } = await supabase
       .from('clubes')
-      .select('*, checkboxes:club_checkboxes(id, etiqueta, requerido, orden)')
+      .select('*, checkboxes:club_checkboxes(id, etiqueta, requerido, orden, pdf_url)')
       .eq('id', id)
       .single()
 
