@@ -9,6 +9,10 @@ import adminActividadesRoutes from './routes/admin/actividades.js'
 import adminGruposRoutes from './routes/admin/grupos.js'
 import adminPersonalRoutes from './routes/admin/personal.js'
 import adminClubActividadesRoutes from './routes/admin/clubActividades.js'
+import adminSemanasRoutes from './routes/admin/semanas.js'
+import adminSlotsRoutes from './routes/admin/slots.js'
+import ninosRoutes from './routes/ninos.js'
+import inscripcionesRoutes from './routes/inscripciones.js'
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -33,6 +37,10 @@ app.use('/api/admin/actividades', adminActividadesRoutes)
 app.use('/api/admin/grupos', adminGruposRoutes)
 app.use('/api/admin/personal', adminPersonalRoutes)
 app.use('/api/admin/club-actividades', adminClubActividadesRoutes)
+app.use('/api/admin/semanas', adminSemanasRoutes)
+app.use('/api/admin/slots', adminSlotsRoutes)
+app.use('/api/ninos', ninosRoutes)
+app.use('/api/inscripciones', inscripcionesRoutes)
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`)
