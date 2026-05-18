@@ -78,6 +78,52 @@ router.patch('/:id', async (req, res) => {
     return res.status(400).json({ error: 'La fecha fin debe ser ≥ la fecha inicio.' })
   }
 
+  let warning = null
+
+  // Al activar: validar que el club tenga mínimos configurados y avisar si
+  // la semana no tiene suficientes clases por categoría para cumplirlos.
+  if (updates.estado === 'activa') {
+    const { data: semana } = await supabase
+      .from('semanas')
+      .select('id, club_id')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (!semana) return res.status(404).json({ error: 'Semana no encontrada.' })
+
+    const { data: minimos } = await supabase
+      .from('club_minimos_categoria')
+      .select('categoria_id, cantidad, categoria:categorias_actividad(nombre)')
+      .eq('club_id', semana.club_id)
+      .gt('cantidad', 0)
+
+    if (!minimos || minimos.length === 0) {
+      return res.status(400).json({
+        error: 'No puedes activar esta semana: el club no tiene configuradas actividades obligatorias semanales por niño. Edita el club y completa la sección "Actividades obligatorias semanales por niño".',
+      })
+    }
+
+    const { data: clases } = await supabase
+      .from('clases')
+      .select('actividad:actividades(categoria_id)')
+      .eq('semana_id', id)
+
+    const porCategoria = new Map()
+    for (const c of clases ?? []) {
+      const cid = c.actividad?.categoria_id
+      if (!cid) continue
+      porCategoria.set(cid, (porCategoria.get(cid) ?? 0) + 1)
+    }
+
+    const faltantes = minimos
+      .filter(m => (porCategoria.get(m.categoria_id) ?? 0) < m.cantidad)
+      .map(m => `${m.categoria?.nombre ?? 'Categoría'} (hay ${porCategoria.get(m.categoria_id) ?? 0}, se requieren ${m.cantidad})`)
+
+    if (faltantes.length > 0) {
+      warning = `Faltan clases para cumplir los mínimos: ${faltantes.join('; ')}. Los padres no podrán completar su inscripción.`
+    }
+  }
+
   const { data, error } = await supabase
     .from('semanas')
     .update(updates)
@@ -86,7 +132,7 @@ router.patch('/:id', async (req, res) => {
     .single()
 
   if (error) return res.status(400).json({ error: error.message })
-  res.json({ semana: data })
+  res.json({ semana: data, warning })
 })
 
 router.delete('/:id', async (req, res) => {

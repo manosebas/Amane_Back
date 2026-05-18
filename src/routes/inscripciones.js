@@ -60,12 +60,13 @@ router.get('/actividades-disponibles/:ninoId', async (req, res) => {
 
   if (!nino.grupo_id) return res.json({ actividades: [] })
 
-  // Clases de la semana con cupo para el grupo del niño
+  // Clases de la semana con cupo para el grupo del niño, incluyendo
+  // categoría de la actividad para agrupar en el frontend.
   const { data: clases } = await supabase
     .from('clases')
     .select(`
       id,
-      actividad:actividades(id, nombre),
+      actividad:actividades(id, nombre, categoria:categorias_actividad(id, nombre)),
       cupos:clase_grupos!inner(id, grupo_id, cupo)
     `)
     .eq('semana_id', semana.id)
@@ -86,13 +87,17 @@ router.get('/actividades-disponibles/:ninoId', async (req, res) => {
     })
   }
 
-  const [{ data: inscritosRaw }, { data: misInsc }] = await Promise.all([
+  const [{ data: inscritosRaw }, { data: misInsc }, { data: minimos }] = await Promise.all([
     cgIds.length > 0
       ? supabase.from('inscripciones').select('clase_grupo_id').in('clase_grupo_id', cgIds)
       : Promise.resolve({ data: [] }),
     supabase.from('inscripciones')
       .select('id, clase_grupo_id')
       .eq('nino_id', nino.id),
+    supabase.from('club_minimos_categoria')
+      .select('categoria_id, cantidad, categoria:categorias_actividad(id, nombre)')
+      .eq('club_id', padre.club_id)
+      .gt('cantidad', 0),
   ])
 
   const ocupados = new Map()
@@ -107,7 +112,13 @@ router.get('/actividades-disponibles/:ninoId', async (req, res) => {
     inscripcion_id: mis.get(it.clase_grupo_id) ?? null,
   }))
 
-  res.json({ actividades })
+  const minimosOut = (minimos ?? []).map(m => ({
+    categoria_id: m.categoria_id,
+    categoria_nombre: m.categoria?.nombre ?? '',
+    cantidad: m.cantidad,
+  }))
+
+  res.json({ actividades, minimos: minimosOut })
 })
 
 router.post('/', async (req, res) => {
@@ -137,6 +148,42 @@ router.post('/', async (req, res) => {
   }
 
   res.json({ inscripcion_id: resultado.inscripcion_id })
+})
+
+// Inscripción por lote (todo o nada): aplica el diff entre lo que el niño
+// tiene inscrito en esa semana y lo deseado. Si algún cupo se llenó, no
+// hace nada y devuelve los clase_grupo_ids llenos para que el frontend
+// los muestre y el padre los reemplace.
+router.post('/batch', async (req, res) => {
+  const { nino_id, semana_id, clase_grupo_ids } = req.body
+  if (!nino_id || !semana_id || !Array.isArray(clase_grupo_ids)) {
+    return res.status(400).json({ error: 'nino_id, semana_id y clase_grupo_ids son requeridos.' })
+  }
+
+  const { data: nino } = await supabase
+    .from('ninos')
+    .select('padre_id')
+    .eq('id', nino_id)
+    .maybeSingle()
+  if (!nino || nino.padre_id !== req.user.id) {
+    return res.status(404).json({ error: 'Niño no encontrado.' })
+  }
+
+  const { data, error } = await supabase.rpc('inscribir_nino_batch', {
+    p_nino_id: nino_id,
+    p_semana_id: semana_id,
+    p_clase_grupo_ids: clase_grupo_ids,
+  })
+
+  if (error) return res.status(500).json({ error: error.message })
+  const resultado = Array.isArray(data) ? data[0] : data
+  if (!resultado?.ok) {
+    return res.status(409).json({
+      error: resultado?.error ?? 'No se pudo inscribir.',
+      llenas: resultado?.llenas ?? [],
+    })
+  }
+  res.json({ ok: true })
 })
 
 router.delete('/:id', async (req, res) => {

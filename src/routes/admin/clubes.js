@@ -81,7 +81,20 @@ async function sincronizarCheckboxes(clubId, checkboxes, archivos) {
 router.use(requireAuth, requireAdmin)
 
 const SELECT_COMPLETO =
-  '*, checkboxes:club_checkboxes(id, etiqueta, requerido, orden, pdf_url), grupos:club_grupos(grupo_id)'
+  '*, checkboxes:club_checkboxes(id, etiqueta, requerido, orden, pdf_url), grupos:club_grupos(grupo_id), minimos:club_minimos_categoria(categoria_id, cantidad)'
+
+function aplanarClub(c) {
+  return {
+    ...c,
+    grupo_ids: (c.grupos ?? []).map(g => g.grupo_id),
+    minimos_categoria: (c.minimos ?? []).map(m => ({
+      categoria_id: m.categoria_id,
+      cantidad: m.cantidad,
+    })),
+    grupos: undefined,
+    minimos: undefined,
+  }
+}
 
 router.get('/', async (_req, res) => {
   const { data, error } = await supabase
@@ -90,12 +103,7 @@ router.get('/', async (_req, res) => {
     .order('created_at')
 
   if (error) return res.status(500).json({ error: error.message })
-  const clubes = (data ?? []).map(c => ({
-    ...c,
-    grupo_ids: (c.grupos ?? []).map(g => g.grupo_id),
-    grupos: undefined,
-  }))
-  res.json({ clubes })
+  res.json({ clubes: (data ?? []).map(aplanarClub) })
 })
 
 async function sincronizarGrupos(clubId, grupoIds) {
@@ -106,10 +114,25 @@ async function sincronizarGrupos(clubId, grupoIds) {
   await supabase.from('club_grupos').insert(filas)
 }
 
+async function sincronizarMinimos(clubId, minimos) {
+  if (!Array.isArray(minimos)) return
+  await supabase.from('club_minimos_categoria').delete().eq('club_id', clubId)
+  const filas = minimos
+    .filter(m => m && m.categoria_id && Number(m.cantidad) > 0)
+    .map(m => ({
+      club_id: clubId,
+      categoria_id: m.categoria_id,
+      cantidad: Number(m.cantidad),
+    }))
+  if (filas.length === 0) return
+  const { error } = await supabase.from('club_minimos_categoria').insert(filas)
+  if (error) throw error
+}
+
 router.post('/', recibirArchivos, async (req, res) => {
   try {
     const datos = parseDatos(req)
-    const { nombre, descripcion, activo, checkboxes, grupo_ids } = datos
+    const { nombre, descripcion, activo, checkboxes, grupo_ids, minimos_categoria } = datos
 
     if (!nombre || nombre.trim().length === 0) {
       return res.status(400).json({ error: 'El nombre del club es requerido.' })
@@ -139,6 +162,7 @@ router.post('/', recibirArchivos, async (req, res) => {
 
     await sincronizarCheckboxes(nuevo.id, checkboxes, archivos)
     await sincronizarGrupos(nuevo.id, grupo_ids)
+    await sincronizarMinimos(nuevo.id, minimos_categoria)
 
     res.json({ club: nuevo })
   } catch (err) {
@@ -151,7 +175,7 @@ router.put('/:id', recibirArchivos, async (req, res) => {
   try {
     const { id } = req.params
     const datos = parseDatos(req)
-    const { nombre, descripcion, activo, checkboxes, grupo_ids } = datos
+    const { nombre, descripcion, activo, checkboxes, grupo_ids, minimos_categoria } = datos
 
     const updates = {}
     if (nombre !== undefined) updates.nombre = nombre.trim()
@@ -177,6 +201,9 @@ router.put('/:id', recibirArchivos, async (req, res) => {
     if (grupo_ids !== undefined) {
       await sincronizarGrupos(id, grupo_ids)
     }
+    if (minimos_categoria !== undefined) {
+      await sincronizarMinimos(id, minimos_categoria)
+    }
 
     const { data: actualizado } = await supabase
       .from('clubes')
@@ -184,13 +211,7 @@ router.put('/:id', recibirArchivos, async (req, res) => {
       .eq('id', id)
       .single()
 
-    const club = actualizado ? {
-      ...actualizado,
-      grupo_ids: (actualizado.grupos ?? []).map(g => g.grupo_id),
-      grupos: undefined,
-    } : null
-
-    res.json({ club })
+    res.json({ club: actualizado ? aplanarClub(actualizado) : null })
   } catch (err) {
     console.error('PUT /api/admin/clubes/:id:', err)
     res.status(500).json({ error: err.message ?? 'Error al actualizar el club.' })
