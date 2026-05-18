@@ -92,15 +92,18 @@ router.patch('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   const { id } = req.params
 
-  // No permitir borrar semanas activas con inscripciones
+  // No permitir borrar semanas con inscripciones
   const { count } = await supabase
     .from('inscripciones')
-    .select('id, slot:slots!inner(semana_id)', { count: 'exact', head: true })
-    .eq('slot.semana_id', id)
+    .select('id, clase_grupo:clase_grupos!inner(clase:clases!inner(semana_id))', {
+      count: 'exact',
+      head: true,
+    })
+    .eq('clase_grupo.clase.semana_id', id)
 
   if ((count ?? 0) > 0) {
     return res.status(400).json({
-      error: `No se puede eliminar: hay ${count} inscripción(es). Eliminar slots o cancelar inscripciones primero.`,
+      error: `No se puede eliminar: hay ${count} inscripción(es). Cancela las inscripciones o elimina las clases primero.`,
     })
   }
 
@@ -109,7 +112,8 @@ router.delete('/:id', async (req, res) => {
   res.json({ ok: true })
 })
 
-// Clonar: crea una nueva semana copiando los slots (sin inscripciones)
+// Clonar: crea una nueva semana copiando las clases y sus cupos
+// (sin inscripciones).
 router.post('/:id/clonar', async (req, res) => {
   const { id } = req.params
   const { fecha_inicio, fecha_fin, nombre } = req.body
@@ -140,14 +144,27 @@ router.post('/:id/clonar', async (req, res) => {
 
   if (errNueva) return res.status(400).json({ error: errNueva.message })
 
-  const { data: slotsOrigen } = await supabase
-    .from('slots')
-    .select('grupo_id, actividad_id, dia, hora_inicio, hora_fin, cupo, personal_id')
+  const { data: clasesOrigen } = await supabase
+    .from('clases')
+    .select('id, actividad_id, cupos:clase_grupos(grupo_id, cupo)')
     .eq('semana_id', id)
 
-  if (slotsOrigen && slotsOrigen.length > 0) {
-    const filas = slotsOrigen.map(s => ({ ...s, semana_id: nueva.id }))
-    await supabase.from('slots').insert(filas)
+  for (const clase of clasesOrigen ?? []) {
+    const { data: nuevaClase } = await supabase
+      .from('clases')
+      .insert({ semana_id: nueva.id, actividad_id: clase.actividad_id })
+      .select('id')
+      .single()
+    if (!nuevaClase) continue
+
+    const filas = (clase.cupos ?? []).map(cg => ({
+      clase_id: nuevaClase.id,
+      grupo_id: cg.grupo_id,
+      cupo: cg.cupo,
+    }))
+    if (filas.length > 0) {
+      await supabase.from('clase_grupos').insert(filas)
+    }
   }
 
   res.json({ semana: nueva })

@@ -10,7 +10,7 @@ import adminGruposRoutes from './routes/admin/grupos.js'
 import adminPersonalRoutes from './routes/admin/personal.js'
 import adminClubActividadesRoutes from './routes/admin/clubActividades.js'
 import adminSemanasRoutes from './routes/admin/semanas.js'
-import adminSlotsRoutes from './routes/admin/slots.js'
+import adminClasesRoutes from './routes/admin/clases.js'
 import ninosRoutes from './routes/ninos.js'
 import inscripcionesRoutes from './routes/inscripciones.js'
 
@@ -38,7 +38,7 @@ app.use('/api/admin/grupos', adminGruposRoutes)
 app.use('/api/admin/personal', adminPersonalRoutes)
 app.use('/api/admin/club-actividades', adminClubActividadesRoutes)
 app.use('/api/admin/semanas', adminSemanasRoutes)
-app.use('/api/admin/slots', adminSlotsRoutes)
+app.use('/api/admin/clases', adminClasesRoutes)
 app.use('/api/ninos', ninosRoutes)
 app.use('/api/inscripciones', inscripcionesRoutes)
 
