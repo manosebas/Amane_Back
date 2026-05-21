@@ -121,6 +121,75 @@ router.get('/actividades-disponibles/:ninoId', async (req, res) => {
   res.json({ actividades, minimos: minimosOut })
 })
 
+// Resumen de inscripciones de un niño agrupadas por semana y categoría.
+// Devuelve [{ semana, categorias: [{ id, nombre, actividades: [{nombre}] }] }]
+// ordenado por fecha_inicio DESC.
+router.get('/resumen/:ninoId', async (req, res) => {
+  const { data: nino } = await supabase
+    .from('ninos')
+    .select('id, padre_id')
+    .eq('id', req.params.ninoId)
+    .maybeSingle()
+  if (!nino || nino.padre_id !== req.user.id) {
+    return res.status(404).json({ error: 'Niño no encontrado.' })
+  }
+
+  const { data, error } = await supabase
+    .from('inscripciones')
+    .select(`
+      id,
+      clase_grupo:clase_grupos(
+        clase:clases(
+          semana:semanas(id, nombre, fecha_inicio, fecha_fin, estado),
+          actividad:actividades(id, nombre, categoria:categorias_actividad(id, nombre))
+        )
+      )
+    `)
+    .eq('nino_id', nino.id)
+
+  if (error) return res.status(500).json({ error: error.message })
+
+  const SIN_CAT = '__sin_categoria__'
+  const semanasMap = new Map()
+  for (const ins of data ?? []) {
+    const clase = ins.clase_grupo?.clase
+    const semana = clase?.semana
+    const actividad = clase?.actividad
+    if (!semana || !actividad) continue
+
+    let entry = semanasMap.get(semana.id)
+    if (!entry) {
+      entry = { semana, categorias: new Map() }
+      semanasMap.set(semana.id, entry)
+    }
+
+    const catId = actividad.categoria?.id ?? SIN_CAT
+    const catNombre = actividad.categoria?.nombre ?? 'Sin categoría'
+    let cat = entry.categorias.get(catId)
+    if (!cat) {
+      cat = { id: catId, nombre: catNombre, actividades: [] }
+      entry.categorias.set(catId, cat)
+    }
+    cat.actividades.push({ id: actividad.id, nombre: actividad.nombre })
+  }
+
+  const semanas = Array.from(semanasMap.values())
+    .map(e => ({
+      semana: e.semana,
+      categorias: Array.from(e.categorias.values())
+        .map(c => ({
+          ...c,
+          actividades: c.actividades.sort((a, b) =>
+            (a.nombre ?? '').localeCompare(b.nombre ?? '', 'es', { sensitivity: 'base' })
+          ),
+        }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' })),
+    }))
+    .sort((a, b) => (b.semana.fecha_inicio ?? '').localeCompare(a.semana.fecha_inicio ?? ''))
+
+  res.json({ semanas })
+})
+
 router.post('/', async (req, res) => {
   const { nino_id, clase_grupo_id } = req.body
   if (!nino_id || !clase_grupo_id) {
