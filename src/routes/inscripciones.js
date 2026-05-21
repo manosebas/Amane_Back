@@ -185,7 +185,7 @@ router.get('/resumen/:ninoId', async (req, res) => {
         }))
         .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' })),
     }))
-    .sort((a, b) => (b.semana.fecha_inicio ?? '').localeCompare(a.semana.fecha_inicio ?? ''))
+    .sort((a, b) => (a.semana.fecha_inicio ?? '').localeCompare(b.semana.fecha_inicio ?? ''))
 
   res.json({ semanas })
 })
