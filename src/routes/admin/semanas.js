@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
   let query = supabase
     .from('semanas')
     .select('*')
-    .order('fecha_inicio', { ascending: false })
+    .order('fecha_inicio', { ascending: true })
   if (req.query.club_id) query = query.eq('club_id', req.query.club_id)
   const { data, error } = await query
   if (error) return res.status(500).json({ error: error.message })
