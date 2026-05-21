@@ -24,7 +24,7 @@ router.get('/semanas-activas', async (req, res) => {
     .select('*')
     .eq('club_id', padre.club_id)
     .eq('estado', 'activa')
-    .order('fecha_inicio', { ascending: false })
+    .order('fecha_inicio', { ascending: true })
 
   res.json({ semanas: data ?? [] })
 })
