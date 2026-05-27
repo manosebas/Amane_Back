@@ -12,6 +12,7 @@ import adminClubActividadesRoutes from './routes/admin/clubActividades.js'
 import adminSemanasRoutes from './routes/admin/semanas.js'
 import adminClasesRoutes from './routes/admin/clases.js'
 import adminDashboardRoutes from './routes/admin/dashboard.js'
+import adminHorarioRoutes from './routes/admin/horario.js'
 import ninosRoutes from './routes/ninos.js'
 import inscripcionesRoutes from './routes/inscripciones.js'
 
@@ -41,6 +42,7 @@ app.use('/api/admin/club-actividades', adminClubActividadesRoutes)
 app.use('/api/admin/semanas', adminSemanasRoutes)
 app.use('/api/admin/clases', adminClasesRoutes)
 app.use('/api/admin/dashboard', adminDashboardRoutes)
+app.use('/api/admin/horario', adminHorarioRoutes)
 app.use('/api/ninos', ninosRoutes)
 app.use('/api/inscripciones', inscripcionesRoutes)
 
