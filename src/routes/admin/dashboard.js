@@ -6,26 +6,9 @@ import { requireAdmin } from '../../middlewares/requireAdmin.js'
 const router = Router()
 router.use(requireAuth, requireAdmin)
 
-// Tarjetas numéricas del panel de inicio.
-router.get('/stats', async (_req, res) => {
-  const [clubes, actividades, semanasActivas, ninos, inscripciones] = await Promise.all([
-    supabase.from('clubes').select('id', { count: 'exact', head: true }),
-    supabase.from('actividades').select('id', { count: 'exact', head: true }),
-    supabase.from('semanas').select('id', { count: 'exact', head: true }).eq('estado', 'activa'),
-    supabase.from('ninos').select('id', { count: 'exact', head: true }),
-    supabase.from('inscripciones').select('id', { count: 'exact', head: true }),
-  ])
-  res.json({
-    clubes: clubes.count ?? 0,
-    actividades: actividades.count ?? 0,
-    semanas_activas: semanasActivas.count ?? 0,
-    ninos: ninos.count ?? 0,
-    inscripciones: inscripciones.count ?? 0,
-  })
-})
-
-// Ocupación por actividad (con sus grupos) para una semana específica.
-// Devuelve [{ actividad, grupos: [{grupo, cupo, inscritos, disponibles}], total }]
+// Ocupación por actividad (con sus grupos) para una semana específica,
+// más un resumen para las tarjetas del panel de inicio.
+// Devuelve { resumen, actividades: [{ actividad, grupos, total }] }
 router.get('/ocupacion', async (req, res) => {
   const semanaId = req.query.semana_id
   if (!semanaId) return res.status(400).json({ error: 'semana_id es requerido.' })
@@ -47,13 +30,15 @@ router.get('/ocupacion', async (req, res) => {
   }
 
   const ocupacion = new Map()
+  const ninosSet = new Set()
   if (cgIds.length > 0) {
     const { data: inscritos } = await supabase
       .from('inscripciones')
-      .select('clase_grupo_id')
+      .select('clase_grupo_id, nino_id')
       .in('clase_grupo_id', cgIds)
     for (const i of inscritos ?? []) {
       ocupacion.set(i.clase_grupo_id, (ocupacion.get(i.clase_grupo_id) ?? 0) + 1)
+      if (i.nino_id) ninosSet.add(i.nino_id)
     }
   }
 
@@ -88,7 +73,26 @@ router.get('/ocupacion', async (req, res) => {
     return (a.actividad?.nombre ?? '').localeCompare(b.actividad?.nombre ?? '', 'es', { sensitivity: 'base' })
   })
 
-  res.json({ actividades })
+  const totalCupos = actividades.reduce((acc, a) => acc + a.total.cupo, 0)
+  const totalInscritos = actividades.reduce((acc, a) => acc + a.total.inscritos, 0)
+
+  let favorita = null
+  for (const a of actividades) {
+    if (a.total.inscritos <= 0) continue
+    if (!favorita || a.total.inscritos > favorita.inscritos) {
+      favorita = { nombre: a.actividad?.nombre ?? '—', inscritos: a.total.inscritos }
+    }
+  }
+
+  const resumen = {
+    inscritos: totalInscritos,
+    cupos: totalCupos,
+    disponibles: Math.max(0, totalCupos - totalInscritos),
+    actividad_favorita: favorita,
+    ninos_registrados: ninosSet.size,
+  }
+
+  res.json({ resumen, actividades })
 })
 
 export default router
